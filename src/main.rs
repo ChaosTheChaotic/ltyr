@@ -3,7 +3,11 @@ use std::{fmt::Write as FmtWrite, io::Write, sync::LazyLock};
 use clap::{Parser, ValueEnum};
 use ratex_layout::{LayoutOptions, layout, to_display_list};
 use ratex_parser::parse;
-use ratex_render::{RenderOptions, render_to_png};
+use ratex_render::render_to_png;
+use typst::layout::Abs;
+use typst_as_lib::{TypstEngine, typst_kit_options::TypstKitFontOptions};
+use typst_layout::PagedDocument;
+use typst_render::render_merged;
 
 #[derive(clap::ValueEnum, Clone, Copy)]
 enum Format {
@@ -123,13 +127,31 @@ fn render_latex(latex: &str) -> Result<(), String> {
     };
     let layout = layout(&ast, &LayoutOptions::default());
     let display_list = to_display_list(&layout);
-    let imgdata = render_to_png(&display_list, &RenderOptions::default())?;
+    let imgdata = render_to_png(&display_list, &ratex_render::RenderOptions::default())?;
 
     display_img(imgdata).map_err(|e| e.to_string())?;
     Ok(())
 }
 
 fn render_typst(typst: &str) -> Result<(), String> {
+    let typst = format!("#set page(margin: 5pt, width: auto, height: auto)\n{typst}");
+    let template = TypstEngine::builder()
+        .main_file(typst)
+        .search_fonts_with(
+            TypstKitFontOptions::default()
+                .include_system_fonts(true)
+                .include_embedded_fonts(true),
+        )
+        .build();
+
+    let doc: PagedDocument = template
+        .compile()
+        .output
+        .map_err(|e| format!("Typst compilation failed: {e:?}"))?;
+
+    let imgdata = render_merged(&doc, &typst_render::RenderOptions::default(), Abs::default(), None).encode_png().map_err(|e| e.to_string())?;
+
+    display_img(imgdata).map_err(|e| e.to_string())?;
     Ok(())
 }
 
