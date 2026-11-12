@@ -1,13 +1,13 @@
-use std::{fmt::Write as FmtWrite, io::Write, sync::LazyLock};
+mod latex;
+mod typst;
+mod utils;
+
+use std::sync::LazyLock;
 
 use clap::{Parser, ValueEnum};
-use ratex_layout::{LayoutOptions, layout, to_display_list};
-use ratex_parser::parse;
-use ratex_render::render_to_png;
-use typst::layout::Abs;
-use typst_as_lib::{TypstEngine, typst_kit_options::TypstKitFontOptions};
-use typst_layout::PagedDocument;
-use typst_render::render_merged;
+
+use crate::latex::render_latex;
+use crate::typst::render_typst;
 
 #[derive(clap::ValueEnum, Clone, Copy)]
 enum Format {
@@ -82,78 +82,6 @@ static FORMAT_FLAGS: LazyLock<String> = LazyLock::new(|| {
         .collect::<Vec<_>>()
         .join(" or ")
 });
-
-fn display_img(data: Vec<u8>) -> std::io::Result<()> {
-    let cmd = kitty_graphics_protocol::Command::builder()
-        .action(kitty_graphics_protocol::Action::TransmitAndDisplay)
-        .format(kitty_graphics_protocol::ImageFormat::Png)
-        .quiet(2)
-        .build();
-
-    let chunks = cmd.serialize_chunked(&data).unwrap(); // This doesent seem to return the Err variant
-
-    let mut stdout = std::io::stdout().lock();
-    for chunk in chunks {
-        stdout.write_all(chunk.as_bytes())?;
-    }
-    stdout.flush()?;
-    println!(); // Ensure trailing newline
-    Ok(())
-}
-
-fn render_latex(latex: &str) -> Result<(), String> {
-    let ast = match parse(latex) {
-        Ok(a) => a,
-        Err(e) => {
-            return Err({
-                let mut err = format!("LaTeX Parse Err: {}\n", e.message);
-                if let Some(pos) = e.loc {
-                    let errline = {
-                        if pos.start <= pos.end && pos.end <= latex.len() {
-                            let padding = " ".repeat(pos.start);
-                            let span_len = std::cmp::max(1, pos.end - pos.start);
-                            let ptrs = "^".repeat(span_len);
-                            format!("{}{}^--- Error here", padding, ptrs)
-                        } else {
-                            "".to_string()
-                        }
-                    };
-                    let _ = writeln!(err, "{}", latex);
-                    let _ = write!(err, "{}", errline);
-                }
-                err
-            });
-        }
-    };
-    let layout = layout(&ast, &LayoutOptions::default());
-    let display_list = to_display_list(&layout);
-    let imgdata = render_to_png(&display_list, &ratex_render::RenderOptions::default())?;
-
-    display_img(imgdata).map_err(|e| e.to_string())?;
-    Ok(())
-}
-
-fn render_typst(typst: &str) -> Result<(), String> {
-    let typst = format!("#set page(margin: 5pt, width: auto, height: auto)\n{typst}");
-    let template = TypstEngine::builder()
-        .main_file(typst)
-        .search_fonts_with(
-            TypstKitFontOptions::default()
-                .include_system_fonts(true)
-                .include_embedded_fonts(true),
-        )
-        .build();
-
-    let doc: PagedDocument = template
-        .compile()
-        .output
-        .map_err(|e| format!("Typst compilation failed: {e:?}"))?;
-
-    let imgdata = render_merged(&doc, &typst_render::RenderOptions::default(), Abs::default(), None).encode_png().map_err(|e| e.to_string())?;
-
-    display_img(imgdata).map_err(|e| e.to_string())?;
-    Ok(())
-}
 
 fn main() {
     let args = Args::parse();
