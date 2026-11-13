@@ -4,6 +4,7 @@ use ratex_layout::{LayoutOptions, layout, to_display_list};
 use ratex_parser::parse;
 use ratex_render::render_to_png;
 
+use crate::consts::{EM_PX, PADDING_PX};
 use crate::utils::display_img;
 
 pub fn render_latex(latex: &str) -> Result<(), String> {
@@ -32,8 +33,16 @@ pub fn render_latex(latex: &str) -> Result<(), String> {
     };
     let layout = layout(&ast, &LayoutOptions::default());
     let display_list = to_display_list(&layout);
-    let imgdata = render_to_png(&display_list, &ratex_render::RenderOptions::default())?;
+    let imgdata = render_to_png(
+        &display_list,
+        &ratex_render::RenderOptions {
+            font_size: EM_PX,
+            padding: PADDING_PX,
+            device_pixel_ratio: 1.0,
+            ..Default::default()
+        },
+    )?;
 
-    display_img(imgdata).map_err(|e| e.to_string())?;
+    display_img(&imgdata)?;
     Ok(())
 }

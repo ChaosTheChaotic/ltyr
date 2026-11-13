@@ -1,6 +1,7 @@
 mod latex;
 mod typst;
 mod utils;
+mod consts;
 
 use std::sync::LazyLock;
 
