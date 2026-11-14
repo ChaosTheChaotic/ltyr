@@ -232,7 +232,13 @@ fn main() {
     match () {
         #[cfg(feature = "output")]
         () if args.out.is_some() => {
-            std::fs::write(args.out.unwrap().path, &img).unwrap_or_else(|e| error!("{e}"));
+            let out = args.out.unwrap();
+            std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&out.path)
+                .and_then(|mut f| std::io::Write::write_all(&mut f, &img))
+                .unwrap_or_else(|e| error!("{e}"));
         }
         _ => {
             display_img(&img).unwrap_or_else(|e| error!("{e}"));
