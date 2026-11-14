@@ -10,16 +10,23 @@ mod utils;
 
 use std::{path::PathBuf, sync::LazyLock};
 
-use clap::{Parser, ValueEnum};
+use clap::{
+    Parser, ValueEnum,
+    builder::{
+        Styles,
+        styling::{AnsiColor, Effects},
+    },
+};
+
+#[cfg(feature = "output")]
 use faccess::PathExt;
 
 #[cfg(feature = "latex")]
 use crate::latex::render_latex;
 #[cfg(feature = "typst")]
 use crate::typst::render_typst;
-use crate::utils::display_img;
-#[cfg(feature = "output")]
-use crate::utils::{ImgFmt, value_names};
+
+use crate::utils::{ImgFmt, display_img, value_names};
 
 #[derive(clap::ValueEnum, Clone, Copy)]
 enum Format {
@@ -102,8 +109,17 @@ impl FormatFlags {
     }
 }
 
+const STYLES: Styles = Styles::styled()
+    .header(AnsiColor::Yellow.on_default().effects(Effects::BOLD))
+    .usage(AnsiColor::Yellow.on_default().effects(Effects::BOLD))
+    .literal(AnsiColor::Green.on_default().effects(Effects::BOLD)) // flag names, possible values
+    .placeholder(AnsiColor::Cyan.on_default()) // <DATA>, <PATH>
+    .error(AnsiColor::Red.on_default().effects(Effects::BOLD))
+    .valid(AnsiColor::Green.on_default())
+    .invalid(AnsiColor::Yellow.on_default());
+
 #[derive(Parser)]
-#[command(arg_required_else_help = true)]
+#[command(arg_required_else_help = true, styles = STYLES)]
 struct Args {
     #[command(flatten)]
     fmt: FormatFlags,
@@ -163,8 +179,8 @@ fn validate_out(s: &str) -> Result<Out, String> {
         .and_then(|e| e.to_str())
         .and_then(|e| ImgFmt::from_str(e, true).ok()) // case insensitive
         .unwrap_or_else(|| {
-            println!(
-                "WARNING: Unrecognised extension, writing png. Supported: {}",
+            warn!(
+                "Unrecognised extension, writing png. Supported: {}",
                 out_formats()
             );
             ImgFmt::Png
@@ -189,7 +205,7 @@ fn main() {
         .selected()
         .or_else(|| Format::detect_fmt(&args.data))
     else {
-        eprintln!(
+        error!(
             "Unable to autodetect format. Try passing {} instead",
             FORMAT_FLAGS.as_str()
         );
@@ -208,7 +224,7 @@ fn main() {
         Format::Typst => render_typst(&args.data, &img_fmt),
     }
     .unwrap_or_else(|e| {
-        eprintln!("{}", e);
+        error!("{}", e);
         std::process::exit(1);
     });
 
@@ -216,10 +232,10 @@ fn main() {
     match () {
         #[cfg(feature = "output")]
         () if args.out.is_some() => {
-            std::fs::write(args.out.unwrap().path, &img).unwrap_or_else(|e| eprintln!("{e}"));
+            std::fs::write(args.out.unwrap().path, &img).unwrap_or_else(|e| error!("{e}"));
         }
         _ => {
-            display_img(&img).unwrap_or_else(|e| eprintln!("{e}"));
+            display_img(&img).unwrap_or_else(|e| error!("{e}"));
         }
     }
 }

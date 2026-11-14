@@ -1,10 +1,12 @@
 use std::io::Write;
 
-use clap::ValueEnum;
+use clap::{
+    ValueEnum,
+    builder::styling::{RgbColor, Style},
+};
 use imagesize::blob_size;
 use kitty_graphics_protocol::get_window_size;
 use little_kitty::placeholder::placeholder_row;
-use owo_colors::OwoColorize;
 
 fn cols_rows_for_blob(data: &[u8]) -> Result<(u16, u16), String> {
     let imgsize = blob_size(data).map_err(|e| e.to_string())?;
@@ -57,9 +59,10 @@ pub fn display_img(data: &[u8]) -> Result<(), String> {
 
     // The image ID is encoded as the fg color (id = R<<16 | G<<8 | B)
     let (red, green, blue) = ((id >> 16) as u8, (id >> 8) as u8, id as u8);
+    let style = Style::new().fg_color(Some(RgbColor(red, green, blue).into()));
     for row in 0..r as usize {
         let line = placeholder_row(0, row, c as usize);
-        writeln!(stdout, "{}", line.truecolor(red, green, blue)).map_err(|e| e.to_string())?;
+        writeln!(stdout, "{style}{line}{style:#}").map_err(|e| e.to_string())?;
     }
     stdout.flush().map_err(|e| e.to_string())?;
     Ok(())
@@ -77,4 +80,22 @@ pub fn value_names<T: ValueEnum + 'static>() -> impl Iterator<Item = String> {
         .iter()
         .filter_map(|v| v.to_possible_value())
         .map(|p| p.get_name().to_owned())
+}
+
+#[macro_export]
+macro_rules! warn {
+    ($($arg:tt)*) => {{
+        use clap::builder::styling::AnsiColor;
+        let s = AnsiColor::Yellow.on_default();
+        eprintln!("{s}[WARN]: {}{s:#}", format!($($arg)*));
+    }}
+}
+
+#[macro_export]
+macro_rules! error {
+    ($($arg:tt)*) => {{
+        use clap::builder::styling::AnsiColor;
+        let s = AnsiColor::Red.on_default();
+        eprintln!("{s}[ERR]: {}{s:#}", format!($($arg)*));
+    }}
 }
