@@ -7,8 +7,7 @@ use std::sync::LazyLock;
 
 use clap::{Parser, ValueEnum};
 
-use crate::latex::render_latex;
-use crate::typst::render_typst;
+use crate::{latex::render_latex, typst::render_typst};
 
 #[derive(clap::ValueEnum, Clone, Copy)]
 enum Format {

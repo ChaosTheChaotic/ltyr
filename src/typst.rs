@@ -1,5 +1,4 @@
-use typst::layout::Abs;
-use typst::utils::Scalar;
+use typst::{layout::Abs, utils::Scalar};
 use typst_as_lib::{TypstEngine, typst_kit_options::TypstKitFontOptions};
 use typst_layout::PagedDocument;
 use typst_render::render_merged;

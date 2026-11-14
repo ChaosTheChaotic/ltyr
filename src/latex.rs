@@ -4,8 +4,10 @@ use ratex_layout::{LayoutOptions, layout, to_display_list};
 use ratex_parser::parse;
 use ratex_render::render_to_png;
 
-use crate::consts::{EM_PX, PADDING_PX};
-use crate::utils::display_img;
+use crate::{
+    consts::{EM_PX, PADDING_PX},
+    utils::display_img,
+};
 
 pub fn render_latex(latex: &str) -> Result<(), String> {
     let ast = match parse(latex) {
