@@ -106,12 +106,14 @@ struct Args {
     #[command(flatten)]
     fmt: FormatFlags,
 
+    #[cfg(feature = "output")]
     #[arg(short, long, value_name = "PATH", value_parser = validate_out)]
     out: Option<PathBuf>,
 
     data: String,
 }
 
+#[cfg(feature = "output")]
 fn validate_out(s: &str) -> Result<PathBuf, String> {
     let mut path = PathBuf::from(s);
 
@@ -185,9 +187,14 @@ fn main() {
         std::process::exit(1);
     });
 
-    if let Some(out) = args.out {
-        std::fs::write(out, &img).unwrap_or_else(|e| eprintln!("{e}"))
-    } else {
-        display_img(&img).unwrap_or_else(|e| eprintln!("{e}"));
+    // We just use a match block here so we can gate the image writing behind the feature
+    match () {
+        #[cfg(feature = "output")]
+        () if args.out.is_some() => {
+            std::fs::write(args.out.unwrap(), &img).unwrap_or_else(|e| eprintln!("{e}"));
+        }
+        _ => {
+            display_img(&img).unwrap_or_else(|e| eprintln!("{e}"));
+        }
     }
 }
