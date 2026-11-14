@@ -18,6 +18,8 @@ use crate::latex::render_latex;
 #[cfg(feature = "typst")]
 use crate::typst::render_typst;
 use crate::utils::display_img;
+#[cfg(feature = "output")]
+use crate::utils::{ImgFmt, value_names};
 
 #[derive(clap::ValueEnum, Clone, Copy)]
 enum Format {
@@ -107,14 +109,27 @@ struct Args {
     fmt: FormatFlags,
 
     #[cfg(feature = "output")]
-    #[arg(short, long, value_name = "PATH", value_parser = validate_out)]
-    out: Option<PathBuf>,
+    #[arg(short, long, value_name = "PATH", value_parser = validate_out, help = format!("Write to PATH instead of displaying. Format is taken from the extension ({})", out_formats()))]
+    out: Option<Out>,
 
     data: String,
 }
 
 #[cfg(feature = "output")]
-fn validate_out(s: &str) -> Result<PathBuf, String> {
+#[derive(Clone)]
+struct Out {
+    path: PathBuf,
+    fmt: ImgFmt,
+}
+
+#[cfg(feature = "output")]
+#[inline]
+fn out_formats() -> String {
+    value_names::<ImgFmt>().collect::<Vec<_>>().join(", ")
+}
+
+#[cfg(feature = "output")]
+fn validate_out(s: &str) -> Result<Out, String> {
     let mut path = PathBuf::from(s);
 
     if path.is_dir() || s.ends_with(std::path::is_separator) {
@@ -143,18 +158,23 @@ fn validate_out(s: &str) -> Result<PathBuf, String> {
         ));
     }
 
-    if path.extension().unwrap_or_default() != "png" {
-        println!("WARNING: Note that the tool only supports png exporting currently");
-    }
-
-    Ok(path)
+    let fmt = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .and_then(|e| ImgFmt::from_str(e, true).ok()) // case insensitive
+        .unwrap_or_else(|| {
+            println!(
+                "WARNING: Unrecognised extension, writing png. Supported: {}",
+                out_formats()
+            );
+            ImgFmt::Png
+        });
+    Ok(Out { path, fmt })
 }
 
 static FORMAT_FLAGS: LazyLock<String> = LazyLock::new(|| {
-    Format::value_variants()
-        .iter()
-        .filter_map(|f| {
-            let name = f.to_possible_value()?.get_name().to_string();
+    value_names::<Format>()
+        .filter_map(|name| {
             let short = name.chars().next()?;
             Some(format!("-{short}/--{name}"))
         })
@@ -176,11 +196,16 @@ fn main() {
         std::process::exit(1);
     };
 
+    #[cfg(feature = "output")]
+    let img_fmt = args.out.as_ref().map_or(ImgFmt::Png, |o| o.fmt);
+    #[cfg(not(feature = "output"))]
+    let img_fmt = ImgFmt::Png;
+
     let img = match fmt {
         #[cfg(feature = "latex")]
-        Format::Latex => render_latex(&args.data),
+        Format::Latex => render_latex(&args.data, &img_fmt),
         #[cfg(feature = "typst")]
-        Format::Typst => render_typst(&args.data),
+        Format::Typst => render_typst(&args.data, &img_fmt),
     }
     .unwrap_or_else(|e| {
         eprintln!("{}", e);
@@ -191,7 +216,7 @@ fn main() {
     match () {
         #[cfg(feature = "output")]
         () if args.out.is_some() => {
-            std::fs::write(args.out.unwrap(), &img).unwrap_or_else(|e| eprintln!("{e}"));
+            std::fs::write(args.out.unwrap().path, &img).unwrap_or_else(|e| eprintln!("{e}"));
         }
         _ => {
             display_img(&img).unwrap_or_else(|e| eprintln!("{e}"));

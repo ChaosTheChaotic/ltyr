@@ -1,5 +1,6 @@
 use std::io::Write;
 
+use clap::ValueEnum;
 use imagesize::blob_size;
 use kitty_graphics_protocol::get_window_size;
 use little_kitty::placeholder::placeholder_row;
@@ -62,4 +63,18 @@ pub fn display_img(data: &[u8]) -> Result<(), String> {
     }
     stdout.flush().map_err(|e| e.to_string())?;
     Ok(())
+}
+
+#[derive(ValueEnum, Clone, Copy)]
+pub enum ImgFmt {
+    Png,
+    #[cfg(any(feature = "svg-latex", feature = "svg-typst"))]
+    Svg,
+}
+
+pub fn value_names<T: ValueEnum + 'static>() -> impl Iterator<Item = String> {
+    T::value_variants()
+        .iter()
+        .filter_map(|v| v.to_possible_value())
+        .map(|p| p.get_name().to_owned())
 }
