@@ -4,12 +4,9 @@ use ratex_layout::{LayoutOptions, layout, to_display_list};
 use ratex_parser::parse;
 use ratex_render::render_to_png;
 
-use crate::{
-    consts::{EM_PX, PADDING_PX},
-    utils::display_img,
-};
+use crate::consts::{EM_PX, PADDING_PX};
 
-pub fn render_latex(latex: &str) -> Result<(), String> {
+pub fn render_latex(latex: &str) -> Result<Vec<u8>, String> {
     let ast = match parse(latex) {
         Ok(a) => a,
         Err(e) => {
@@ -45,6 +42,5 @@ pub fn render_latex(latex: &str) -> Result<(), String> {
         },
     )?;
 
-    display_img(&imgdata)?;
-    Ok(())
+    Ok(imgdata)
 }

@@ -4,11 +4,10 @@ use typst_layout::PagedDocument;
 use typst_render::render_merged;
 
 use crate::consts::{EM_PX, PADDING_PX};
-use crate::utils::display_img;
 
 const TYPST_TXT_PT: f32 = 12.0;
 
-pub fn render_typst(typst: &str) -> Result<(), String> {
+pub fn render_typst(typst: &str) -> Result<Vec<u8>, String> {
     let px_per_pt = EM_PX / TYPST_TXT_PT;
     let margin_pt = PADDING_PX / px_per_pt;
     let typst = format!(
@@ -42,6 +41,5 @@ pub fn render_typst(typst: &str) -> Result<(), String> {
     .encode_png()
     .map_err(|e| e.to_string())?;
 
-    display_img(&imgdata)?;
-    Ok(())
+    Ok(imgdata)
 }
