@@ -1,4 +1,9 @@
+#[cfg(not(any(feature = "latex", feature = "typst")))]
+compile_error!("Enable at least one of latex or typst features");
+
+#[cfg(feature = "latex")]
 mod latex;
+#[cfg(feature = "typst")]
 mod typst;
 mod utils;
 mod consts;
@@ -7,16 +12,22 @@ use std::sync::LazyLock;
 
 use clap::{Parser, ValueEnum};
 
-use crate::{latex::render_latex, typst::render_typst};
+#[cfg(feature = "latex")]
+use crate::latex::render_latex;
+#[cfg(feature = "typst")]
+use crate::typst::render_typst;
 
 #[derive(clap::ValueEnum, Clone, Copy)]
 enum Format {
+    #[cfg(feature = "latex")]
     Latex,
+    #[cfg(feature = "typst")]
     Typst,
 }
 
 impl Format {
     // Function implementation taken from tylax
+    #[cfg(all(feature = "latex", feature = "typst"))]
     pub fn detect_fmt(s: &str) -> Option<Self> {
         let latex_score: i32 = if s.contains("\\documentclass") { 10 } else { 0 }
             + if s.contains("\\begin{document}") {
@@ -50,16 +61,41 @@ impl Format {
             None
         }
     }
+    #[cfg(all(feature = "latex", not(feature = "typst")))]
+    pub fn detect_fmt(_: &str) -> Option<Self> {
+        Some(Self::Latex)
+    }
+
+    #[cfg(all(feature = "typst", not(feature = "latex")))]
+    pub fn detect_fmt(_: &str) -> Option<Self> {
+        Some(Self::Typst)
+    }
 }
 
 #[derive(clap::Args)]
 #[group(multiple = false)]
 struct FormatFlags {
+    #[cfg(feature = "typst")]
     #[arg(short, long)]
     typst: bool,
 
+    #[cfg(feature = "latex")]
     #[arg(short, long)]
     latex: bool,
+}
+
+impl FormatFlags {
+    fn selected(&self) -> Option<Format> {
+        #[cfg(feature = "typst")]
+        if self.typst {
+            return Some(Format::Typst);
+        }
+        #[cfg(feature = "latex")]
+        if self.latex {
+            return Some(Format::Latex);
+        }
+        None
+    }
 }
 
 #[derive(Parser)]
@@ -85,24 +121,21 @@ static FORMAT_FLAGS: LazyLock<String> = LazyLock::new(|| {
 
 fn main() {
     let args = Args::parse();
-    let fmt = if args.fmt.typst {
-        Format::Typst
-    } else if args.fmt.latex {
-        Format::Latex
-    } else {
-        match Format::detect_fmt(&args.data) {
-            Some(f) => f,
-            None => {
-                eprintln!(
-                    "Unable to autodetect format. Try passing {} instead",
-                    FORMAT_FLAGS.as_str()
-                );
-                std::process::exit(1);
-            }
-        }
+    let Some(fmt) = args
+        .fmt
+        .selected()
+        .or_else(|| Format::detect_fmt(&args.data))
+    else {
+        eprintln!(
+            "Unable to autodetect format. Try passing {} instead",
+            FORMAT_FLAGS.as_str()
+        );
+        std::process::exit(1);
     };
     if let Err(e) = match fmt {
+        #[cfg(feature = "latex")]
         Format::Latex => render_latex(&args.data),
+        #[cfg(feature = "typst")]
         Format::Typst => render_typst(&args.data),
     } {
         eprintln!("{}", e)

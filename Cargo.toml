@@ -3,20 +3,28 @@ name = "ltyr"
 version = "0.1.0"
 edition = "2024"
 
+[features]
+default = ["latex", "typst"]
+latex = ["dep:ratex-layout", "dep:ratex-parser", "dep:ratex-render"]
+typst = ["dep:typst", "dep:typst-as-lib", "dep:typst-layout", "dep:typst-render"]
+
 [dependencies]
 clap = { version = "4.6.7", features = ["derive"] }
 imagesize = { version = "0.15.0", default-features = false, features = ["png"] }
 kitty-graphics-protocol = "0.1.3"
 little-kitty = "0.0.3"
 owo-colors = "4.4.0"
-ratex-layout = "0.1.15"
-ratex-parser = "0.1.15"
-ratex-render = { version = "0.1.15", features = ["embed-fonts"] }
-typst = "0.15.1"
-typst-as-lib = { version = "0.17.0", features = ["typst-kit-embed-fonts", "typst-kit-fonts"] }
-typst-layout = "0.15.1"
-typst-render = "0.15.1"
+
+ratex-layout = { version = "0.1.15", optional = true }
+ratex-parser = { version = "0.1.15", optional = true }
+ratex-render = { version = "0.1.15", features = ["embed-fonts"], optional = true }
+
+typst = { version = "0.15.1", optional = true }
+typst-as-lib = { version = "0.17.0", features = ["typst-kit-embed-fonts", "typst-kit-fonts"], optional = true }
+typst-layout = { version = "0.15.1", optional = true }
+typst-render = { version = "0.15.1", optional = true }
 
 [profile.release]
 lto = true
 codegen-units = 1
+strip = true
