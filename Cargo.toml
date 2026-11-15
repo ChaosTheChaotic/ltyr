@@ -4,12 +4,13 @@ version = "0.1.0"
 edition = "2024"
 
 [features]
-default = ["latex", "typst", "output", "svg-latex", "svg-typst"]
+default = ["latex", "typst", "output", "svg-latex", "svg-typst", "watch"]
 latex = ["dep:ratex-layout", "dep:ratex-parser", "dep:ratex-render"]
 typst = ["dep:typst", "dep:typst-as-lib", "dep:typst-layout", "dep:typst-render"]
 output = ["dep:faccess"]
 svg-latex = ["latex", "output", "dep:ratex-svg"]
 svg-typst = ["typst", "output", "dep:typst-svg"]
+watch = ["dep:notify", "dep:faccess", "crossterm/events"]
 
 [dependencies]
 clap = { version = "4.6.7", features = ["derive"] }
@@ -29,6 +30,8 @@ typst-as-lib = { version = "0.17.0", features = ["typst-kit-embed-fonts", "typst
 typst-layout = { version = "0.15.1", optional = true }
 typst-render = { version = "0.15.1", optional = true }
 typst-svg = { version = "0.15.1", optional = true }
+notify = { version = "8.2.2", optional = true, default-features = false }
+crossterm = { version = "0.29.0", default-features = false }
 
 [profile.release]
 lto = true

@@ -2,13 +2,21 @@
 compile_error!("Enable at least one of latex or typst features");
 
 mod consts;
+mod fmt;
 #[cfg(feature = "latex")]
 mod latex;
+mod term;
 #[cfg(feature = "typst")]
 mod typst;
 mod utils;
+#[cfg(feature = "watch")]
+mod watch;
+#[cfg(feature = "watch")]
+mod worker;
 
-use std::{path::PathBuf, sync::LazyLock};
+#[cfg(any(feature = "output", feature = "watch"))]
+use std::path::PathBuf;
+use std::process::ExitCode;
 
 use clap::{
     Parser, ValueEnum,
@@ -18,74 +26,17 @@ use clap::{
     },
 };
 
-#[cfg(feature = "output")]
+#[cfg(any(feature = "output", feature = "watch"))]
 use faccess::PathExt;
 
-#[cfg(feature = "latex")]
-use crate::latex::render_latex;
-#[cfg(feature = "typst")]
-use crate::typst::render_typst;
-
-use crate::utils::{ImgFmt, display_img, value_names};
-
-#[derive(clap::ValueEnum, Clone, Copy)]
-enum Format {
-    #[cfg(feature = "latex")]
-    Latex,
-    #[cfg(feature = "typst")]
-    Typst,
-}
-
-impl Format {
-    // Function implementation taken from tylax
-    #[cfg(all(feature = "latex", feature = "typst"))]
-    pub fn detect_fmt(s: &str) -> Option<Self> {
-        let latex_score: i32 = if s.contains("\\documentclass") { 10 } else { 0 }
-            + if s.contains("\\begin{document}") {
-                10
-            } else {
-                0
-            }
-            + if s.contains("\\section") { 5 } else { 0 }
-            + if s.contains("\\frac") { 3 } else { 0 }
-            + if s.contains("\\alpha") { 2 } else { 0 }
-            + if s.contains("\\\\") { 2 } else { 0 }
-            + (s.matches('\\').count() as i32);
-
-        let typst_score: i32 = if s.contains("#set") { 10 } else { 0 }
-            + if s.contains("#show") { 10 } else { 0 }
-            + if s.contains("#import") { 8 } else { 0 }
-            + if s.starts_with('=') { 5 } else { 0 }
-            + if s.contains("\n= ") { 5 } else { 0 }
-            + if s.contains("frac(") { 3 } else { 0 }
-            + if s.contains("sqrt(") { 3 } else { 0 };
-
-        if latex_score > typst_score + 3 {
-            Some(Format::Latex)
-        } else if typst_score > latex_score + 3 {
-            Some(Format::Typst)
-        } else if latex_score > 0 {
-            Some(Format::Latex)
-        } else if typst_score > 0 {
-            Some(Format::Typst)
-        } else {
-            None
-        }
-    }
-    #[cfg(all(feature = "latex", not(feature = "typst")))]
-    pub fn detect_fmt(_: &str) -> Option<Self> {
-        Some(Self::Latex)
-    }
-
-    #[cfg(all(feature = "typst", not(feature = "latex")))]
-    pub fn detect_fmt(_: &str) -> Option<Self> {
-        Some(Self::Typst)
-    }
-}
+use crate::{
+    fmt::{Fmt, render},
+    utils::{ImgFmt, value_names},
+};
 
 #[derive(clap::Args)]
 #[group(multiple = false)]
-struct FormatFlags {
+struct FmtFlags {
     #[cfg(feature = "typst")]
     #[arg(short, long)]
     typst: bool,
@@ -95,15 +46,15 @@ struct FormatFlags {
     latex: bool,
 }
 
-impl FormatFlags {
-    fn selected(&self) -> Option<Format> {
+impl FmtFlags {
+    fn selected(&self) -> Option<Fmt> {
         #[cfg(feature = "typst")]
         if self.typst {
-            return Some(Format::Typst);
+            return Some(Fmt::Typst);
         }
         #[cfg(feature = "latex")]
         if self.latex {
-            return Some(Format::Latex);
+            return Some(Fmt::Latex);
         }
         None
     }
@@ -122,13 +73,33 @@ const STYLES: Styles = Styles::styled()
 #[command(arg_required_else_help = true, styles = STYLES)]
 struct Args {
     #[command(flatten)]
-    fmt: FormatFlags,
+    fmt: FmtFlags,
 
     #[cfg(feature = "output")]
-    #[arg(short, long, value_name = "PATH", value_parser = validate_out, help = format!("Write to PATH instead of displaying. Format is taken from the extension ({})", out_formats()))]
+    #[arg(short, long, value_name = "PATH", value_parser = validate_out, help = format!("Write to PATH instead of displaying. Fmt is taken from the extension ({})", out_fmts()))]
     out: Option<Out>,
 
-    data: String,
+    // Re-render file whenever it changes (q, esc or ctrl+c to quit)
+    #[cfg(feature = "watch")]
+    #[arg(short, long, value_name = "FILE", value_parser = validate_watch, conflicts_with = "data")]
+    watch: Option<PathBuf>,
+
+    // Internal: render stdin and write the result to stdout
+    // Used by --watch so a render can be killed when the file changes again.
+    #[cfg(feature = "watch")]
+    #[arg(long = worker::CHILD_FLAG, value_name = "FORMAT", hide = true, conflicts_with_all = ["data", "watch"])]
+    render_child: Option<Fmt>,
+
+    #[cfg(feature = "watch")]
+    #[arg(long = worker::CHILD_IMG_FLAG, value_name = "IMG", hide = true, requires = "render_child", conflicts_with_all = ["data", "watch"])]
+    render_child_img: Option<ImgFmt>,
+
+    #[cfg_attr(
+        feature = "watch",
+        arg(required_unless_present_any = ["watch", "render_child"])
+    )]
+    #[cfg_attr(not(feature = "watch"), arg(required = true))]
+    data: Option<String>,
 }
 
 #[cfg(feature = "output")]
@@ -138,29 +109,37 @@ struct Out {
     fmt: ImgFmt,
 }
 
+#[cfg(feature = "watch")]
+fn validate_watch(s: &str) -> Result<PathBuf, String> {
+    let path = PathBuf::from(s);
+
+    if !path.is_file() {
+        return Err(format!("{} is not an existing file", path.display()));
+    }
+
+    if !path.readable() {
+        return Err(format!("Cannot read file {}", path.display()));
+    }
+
+    Ok(path)
+}
+
 #[cfg(feature = "output")]
 #[inline]
-fn out_formats() -> String {
+fn out_fmts() -> String {
     value_names::<ImgFmt>().collect::<Vec<_>>().join(", ")
 }
 
 #[cfg(feature = "output")]
 fn validate_out(s: &str) -> Result<Out, String> {
     let mut path = PathBuf::from(s);
-
     if path.is_dir() || s.ends_with(std::path::is_separator) {
         path = path.join("out.png");
     }
-
-    if path.exists() {
-        return Err(format!("The file {} already exists", path.display()));
-    }
-
     let parent = path
         .parent()
         .filter(|p| !p.as_os_str().is_empty())
         .unwrap_or(std::path::Path::new("."));
-
     if !parent.exists() {
         return Err(format!(
             "The parent folder of {} does not exist. Refusing to write",
@@ -173,75 +152,104 @@ fn validate_out(s: &str) -> Result<Out, String> {
             path.display()
         ));
     }
-
     let fmt = path
         .extension()
         .and_then(|e| e.to_str())
-        .and_then(|e| ImgFmt::from_str(e, true).ok()) // case insensitive
+        .and_then(|e| ImgFmt::from_str(e, true).ok())
         .unwrap_or_else(|| {
             warn!(
                 "Unrecognised extension, writing png. Supported: {}",
-                out_formats()
+                out_fmts()
             );
             ImgFmt::Png
         });
     Ok(Out { path, fmt })
 }
 
-static FORMAT_FLAGS: LazyLock<String> = LazyLock::new(|| {
-    value_names::<Format>()
-        .filter_map(|name| {
-            let short = name.chars().next()?;
-            Some(format!("-{short}/--{name}"))
-        })
-        .collect::<Vec<_>>()
-        .join(" or ")
-});
+fn main() -> ExitCode {
+    let mut args = Args::parse();
 
-fn main() {
-    let args = Args::parse();
-    let Some(fmt) = args
-        .fmt
-        .selected()
-        .or_else(|| Format::detect_fmt(&args.data))
-    else {
-        error!(
-            "Unable to autodetect format. Try passing {} instead",
-            FORMAT_FLAGS.as_str()
-        );
-        std::process::exit(1);
+    #[cfg(feature = "watch")]
+    if let Some(fmt) = args.render_child {
+        let img = args.render_child_img.unwrap_or(ImgFmt::Png);
+        return worker::run_child(&fmt, &img);
+    }
+
+    #[cfg(feature = "watch")]
+    if let Some(path) = args.watch.take() {
+        #[cfg(feature = "output")]
+        let result = watch::run(path, args.fmt.selected(), args.out.take());
+        #[cfg(not(feature = "output"))]
+        let result = watch::run(path, args.fmt.selected());
+        return match result {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(e) => {
+                error!("{e}");
+                ExitCode::FAILURE
+            }
+        };
+    }
+
+    render_once(&args)
+}
+
+fn render_once(args: &Args) -> ExitCode {
+    let Some(data) = args.data.as_deref() else {
+        return ExitCode::FAILURE;
     };
+
+    let fmt = match Fmt::resolve(args.fmt.selected(), data, None) {
+        Ok(f) => f,
+        Err(e) => {
+            error!("{e}");
+            return ExitCode::FAILURE;
+        }
+    };
+
+    // One-shot mode keeps the refuse to overwrite
+    // Check it before rendering
+    #[cfg(feature = "output")]
+    if let Some(out) = &args.out
+        && out.path.exists()
+    {
+        error!("The file {} already exists", out.path.display());
+        return ExitCode::FAILURE;
+    }
 
     #[cfg(feature = "output")]
     let img_fmt = args.out.as_ref().map_or(ImgFmt::Png, |o| o.fmt);
     #[cfg(not(feature = "output"))]
     let img_fmt = ImgFmt::Png;
 
-    let img = match fmt {
-        #[cfg(feature = "latex")]
-        Format::Latex => render_latex(&args.data, &img_fmt),
-        #[cfg(feature = "typst")]
-        Format::Typst => render_typst(&args.data, &img_fmt),
-    }
-    .unwrap_or_else(|e| {
-        error!("{}", e);
-        std::process::exit(1);
-    });
-
-    // We just use a match block here so we can gate the image writing behind the feature
-    match () {
-        #[cfg(feature = "output")]
-        () if args.out.is_some() => {
-            let out = args.out.unwrap();
-            std::fs::OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .open(&out.path)
-                .and_then(|mut f| std::io::Write::write_all(&mut f, &img))
-                .unwrap_or_else(|e| error!("{e}"));
+    let img = match render(&fmt, data, &img_fmt) {
+        Ok(img) => img,
+        Err(e) => {
+            error!("{e}");
+            return ExitCode::FAILURE;
         }
-        _ => {
-            display_img(&img).unwrap_or_else(|e| error!("{e}"));
+    };
+
+    #[cfg(feature = "output")]
+    if let Some(out) = args.out.as_ref() {
+        return match std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&out.path)
+            .and_then(|mut f| std::io::Write::write_all(&mut f, &img))
+        {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(e) => {
+                error!("{e}");
+                ExitCode::FAILURE
+            }
+        };
+    }
+
+    match term::display_img(&img) {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(e) => {
+            error!("{e}");
+            ExitCode::FAILURE
         }
     }
 }
